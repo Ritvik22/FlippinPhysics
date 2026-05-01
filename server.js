@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cedSource, getUnit, units } from "./data/ced.js";
@@ -15,8 +15,10 @@ const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 5173);
 const aiProvider = "gemini";
 const model = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
-const storePath = join(__dirname, "data", "appState.json");
-const sessions = new Map();
+const memoryStore = { users: [] };
+const sessionSecret = process.env.SESSION_SECRET || "local-dev-session-secret-change-me";
+let sql;
+let dbReady;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -143,6 +145,26 @@ function getCookie(req, name) {
   return pair ? decodeURIComponent(pair.slice(name.length + 1)) : "";
 }
 
+function signSession(userId, nonce = randomBytes(12).toString("hex")) {
+  const payload = Buffer.from(JSON.stringify({ userId, nonce })).toString("base64url");
+  const signature = createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifySession(token) {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature) return null;
+  const expected = createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+  const left = Buffer.from(signature);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
+  try {
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).userId || null;
+  } catch {
+    return null;
+  }
+}
+
 async function parseJson(req) {
   let body = "";
   for await (const chunk of req) body += chunk;
@@ -154,17 +176,89 @@ function hasUsableKey(value, placeholder) {
 }
 
 async function readStore() {
-  try {
-    return JSON.parse(await readFile(storePath, "utf8"));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    return { users: [] };
-  }
+  if (!process.env.DATABASE_URL) return memoryStore;
+  await ensureDb();
+  const rows = await sql`
+    select id, name, email, salt, password_hash, answered, correct, streak, created_at, updated_at
+    from users
+    order by created_at asc
+  `;
+  return {
+    users: rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      salt: row.salt,
+      passwordHash: row.password_hash,
+      answered: Number(row.answered || 0),
+      correct: Number(row.correct || 0),
+      streak: Number(row.streak || 0),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }))
+  };
 }
 
 async function writeStore(store) {
-  await mkdir(join(__dirname, "data"), { recursive: true });
-  await writeFile(storePath, JSON.stringify(store, null, 2));
+  if (!process.env.DATABASE_URL) {
+    memoryStore.users = store.users;
+    return;
+  }
+  await ensureDb();
+  for (const user of store.users) {
+    await sql`
+      insert into users (id, name, email, salt, password_hash, answered, correct, streak, created_at, updated_at)
+      values (
+        ${user.id},
+        ${user.name},
+        ${user.email},
+        ${user.salt},
+        ${user.passwordHash},
+        ${user.answered || 0},
+        ${user.correct || 0},
+        ${user.streak || 0},
+        ${user.createdAt ? new Date(user.createdAt) : new Date()},
+        ${user.updatedAt ? new Date(user.updatedAt) : null}
+      )
+      on conflict (id) do update set
+        name = excluded.name,
+        email = excluded.email,
+        salt = excluded.salt,
+        password_hash = excluded.password_hash,
+        answered = excluded.answered,
+        correct = excluded.correct,
+        streak = excluded.streak,
+        updated_at = excluded.updated_at
+    `;
+  }
+}
+
+async function ensureDb() {
+  if (!process.env.DATABASE_URL) return;
+  if (!dbReady) {
+    dbReady = (async () => {
+      const postgres = (await import("postgres")).default;
+      sql = postgres(process.env.DATABASE_URL, {
+        max: 3,
+        ssl: process.env.DATABASE_URL.includes("sslmode=disable") ? false : "require"
+      });
+      await sql`
+        create table if not exists users (
+          id text primary key,
+          name text not null,
+          email text not null unique,
+          salt text not null,
+          password_hash text not null,
+          answered integer not null default 0,
+          correct integer not null default 0,
+          streak integer not null default 0,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz
+        )
+      `;
+    })();
+  }
+  await dbReady;
 }
 
 function normalizeEmail(email) {
@@ -196,7 +290,7 @@ function verifyPassword(password, user) {
 
 async function getCurrentUser(req) {
   const token = getCookie(req, "ap_em_session");
-  const userId = sessions.get(token);
+  const userId = verifySession(token);
   if (!userId) return null;
   const store = await readStore();
   return store.users.find((user) => user.id === userId) || null;
@@ -230,9 +324,7 @@ async function handleSignup(req, res) {
   };
   store.users.push(user);
   await writeStore(store);
-  const token = randomBytes(24).toString("hex");
-  sessions.set(token, user.id);
-  setJsonCookie(res, token);
+  setJsonCookie(res, signSession(user.id));
   json(res, 201, { user: publicUser(user), leaderboard: leaderboardFromStore(store) });
 }
 
@@ -246,15 +338,11 @@ async function handleLogin(req, res) {
     json(res, 401, { error: "Invalid email or password." });
     return;
   }
-  const token = randomBytes(24).toString("hex");
-  sessions.set(token, user.id);
-  setJsonCookie(res, token);
+  setJsonCookie(res, signSession(user.id));
   json(res, 200, { user: publicUser(user), leaderboard: leaderboardFromStore(store) });
 }
 
 async function handleLogout(req, res) {
-  const token = getCookie(req, "ap_em_session");
-  if (token) sessions.delete(token);
   clearSessionCookie(res);
   json(res, 200, { ok: true });
 }
@@ -279,7 +367,7 @@ function leaderboardFromStore(store) {
 
 async function recordResult(req, evaluation) {
   const token = getCookie(req, "ap_em_session");
-  const userId = sessions.get(token);
+  const userId = verifySession(token);
   if (!userId) return null;
   const store = await readStore();
   const user = store.users.find((item) => item.id === userId);
