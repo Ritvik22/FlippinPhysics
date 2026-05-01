@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AP Physics C: E&M Practice Agents</title>
+    <script>
+      window.MathJax = {
+        tex: { inlineMath: [["\\(", "\\)"], ["$", "$"]], displayMath: [["\\[", "\\]"]] },
+        svg: { fontCache: "global" }
+      };
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section id="landingView" class="landing-view">
+      <div class="landing-copy">
+        <div class="landing-mark">AP Physics C: E&M</div>
+        <h1>Practice that feels like the exam room.</h1>
+        <p>Work through calculus-based E&M questions, diagrams, explanations, and a shared leaderboard.</p>
+        <div class="landing-stats">
+          <div><strong>6</strong><span>CED units</span></div>
+          <div><strong>MCQ + FRQ</strong><span>practice modes</span></div>
+          <div><strong>Live</strong><span>leaderboard</span></div>
+        </div>
+      </div>
+
+      <div class="auth-panel">
+        <div class="auth-tabs">
+          <button id="loginTab" class="active" type="button">Log in</button>
+          <button id="signupTab" type="button">Sign up</button>
+        </div>
+        <form id="authForm" class="auth-form">
+          <label id="nameField">
+            <span>Name</span>
+            <input id="nameInput" name="name" autocomplete="name" />
+          </label>
+          <label>
+            <span>Email</span>
+            <input id="emailInput" name="email" type="email" autocomplete="email" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="passwordInput" name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button id="authSubmit" class="primary-button" type="submit">Log in</button>
+          <p id="authError" class="auth-error"></p>
+        </form>
+      </div>
+    </section>
+
+    <div class="app-shell hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">AP</div>
+          <div>
+            <h1>Physics E&M</h1>
+            <p>CED-aligned question agents</p>
+          </div>
+        </div>
+
+        <section class="control-block">
+          <label for="unitSelect">Unit</label>
+          <select id="unitSelect"></select>
+        </section>
+
+        <section class="control-block">
+          <label for="topicSelect">Topic</label>
+          <select id="topicSelect"></select>
+        </section>
+
+        <section class="control-block">
+          <label>Mode</label>
+          <div class="segmented" role="group" aria-label="Question type">
+            <button class="segment active" data-type="mcq" type="button">MCQ</button>
+            <button class="segment" data-type="frq" type="button">FRQ</button>
+          </div>
+        </section>
+
+        <section class="control-block">
+          <label>Difficulty</label>
+          <div class="segmented three" role="group" aria-label="Difficulty">
+            <button class="difficulty active" data-difficulty="foundational" type="button">Base</button>
+            <button class="difficulty" data-difficulty="exam" type="button">Exam</button>
+            <button class="difficulty" data-difficulty="challenge" type="button">Hard</button>
+          </div>
+        </section>
+
+        <button id="generateBtn" class="primary-button" type="button">
+          <span>Generate Practice</span>
+          <span aria-hidden="true">↻</span>
+        </button>
+
+        <div class="account-panel">
+          <p id="accountName">Signed in</p>
+          <button id="logoutBtn" class="sidebar-link" type="button">Log out</button>
+        </div>
+
+        <div class="source-panel">
+          <p>Source basis</p>
+          <a href="https://apcentral.collegeboard.org/courses/ap-physics-c-electricity-and-magnetism" target="_blank" rel="noreferrer">AP Central course page</a>
+          <a href="https://apcentral.collegeboard.org/courses/ap-physics-c-electricity-and-magnetism/exam" target="_blank" rel="noreferrer">AP Central exam page</a>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">AP Physics C: Electricity and Magnetism</p>
+            <h2 id="unitTitle">Loading units...</h2>
+          </div>
+          <div class="stats-grid" aria-label="Progress stats">
+            <div>
+              <span id="answeredCount">0</span>
+              <p>answered</p>
+            </div>
+            <div>
+              <span id="accuracyCount">0%</span>
+              <p>accuracy</p>
+            </div>
+            <div>
+              <span id="streakCount">0</span>
+              <p>streak</p>
+            </div>
+          </div>
+        </header>
+
+        <section class="unit-strip" id="unitStrip" aria-label="Units"></section>
+
+        <section class="workspace">
+          <article class="question-panel">
+            <div class="question-meta">
+              <span id="topicBadge">Topic</span>
+              <span id="kindBadge">Question type</span>
+              <span id="difficultyBadge">Exam</span>
+              <span id="apiBadge">Ready</span>
+            </div>
+            <div class="question-body">
+              <h3 id="questionPrompt">Choose a unit and generate your first practice question.</h3>
+              <figure id="diagramFrame" class="diagram-frame hidden">
+                <div id="diagramArea" class="diagram-area"></div>
+                <figcaption>Diagram</figcaption>
+              </figure>
+            </div>
+            <div id="graphHint" class="graph-hint hidden"></div>
+            <div id="answerArea" class="answer-area"></div>
+            <div class="actions">
+              <button id="submitBtn" class="secondary-button" type="button" disabled>Submit Answer</button>
+              <button id="nextBtn" class="ghost-button" type="button">Next Question</button>
+            </div>
+          </article>
+
+          <aside class="feedback-panel">
+            <h3>Feedback</h3>
+            <div id="feedbackEmpty" class="empty-state">
+              Answer a question to see targeted feedback, explanation, and next steps.
+            </div>
+            <div id="feedbackContent" class="hidden">
+              <div id="scorePill" class="score-pill"></div>
+              <p id="feedbackText"></p>
+              <div id="modelAnswerBlock" class="model-answer"></div>
+              <div id="nextStepBlock" class="next-step"></div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="leaderboard-section">
+          <div class="section-heading">
+            <h3>Leaderboard</h3>
+            <button id="refreshLeaderboard" class="text-button" type="button">Refresh</button>
+          </div>
+          <div id="leaderboardList" class="leaderboard-list"></div>
+        </section>
+
+        <section class="progress-section">
+          <div class="section-heading">
+            <h3>Topic Progress</h3>
+            <button id="resetProgress" class="text-button" type="button">Reset local progress</button>
+          </div>
+          <div id="topicProgress" class="topic-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
