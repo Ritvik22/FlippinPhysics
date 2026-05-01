@@ -460,7 +460,12 @@ async function callGemini({ messages, schema }) {
 }
 
 async function callAI(options) {
-  return callGemini(options);
+  try {
+    return await callGemini(options);
+  } catch (error) {
+    console.warn(`AI provider unavailable; using fallback. ${error.message}`);
+    return null;
+  }
 }
 
 async function handleGenerate(req, res) {
@@ -547,7 +552,7 @@ async function handleEvaluate(req, res) {
         maxScore: question.rubric?.length || 4,
         isCorrect: false,
         feedback:
-          "Add GEMINI_API_KEY to enable AI grading. Compare your response to the model answer and rubric.",
+          "AI grading is unavailable, so compare your response to the model answer and rubric.",
         strengths: [],
         nextStep: "Check that your answer defines variables, uses the correct law, includes units, and justifies direction or sign."
       };
