@@ -15,6 +15,7 @@ const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 5173);
 const aiProvider = "gemini";
 const model = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 const memoryStore = { users: [] };
 const sessionSecret = process.env.SESSION_SECRET || "local-dev-session-secret-change-me";
 let sql;
@@ -176,7 +177,7 @@ function hasUsableKey(value, placeholder) {
 }
 
 async function readStore() {
-  if (!process.env.DATABASE_URL) return memoryStore;
+  if (!databaseUrl) return memoryStore;
   await ensureDb();
   const rows = await sql`
     select id, name, email, salt, password_hash, answered, correct, streak, created_at, updated_at
@@ -200,7 +201,7 @@ async function readStore() {
 }
 
 async function writeStore(store) {
-  if (!process.env.DATABASE_URL) {
+  if (!databaseUrl) {
     memoryStore.users = store.users;
     return;
   }
@@ -234,13 +235,13 @@ async function writeStore(store) {
 }
 
 async function ensureDb() {
-  if (!process.env.DATABASE_URL) return;
+  if (!databaseUrl) return;
   if (!dbReady) {
     dbReady = (async () => {
       const postgres = (await import("postgres")).default;
-      sql = postgres(process.env.DATABASE_URL, {
+      sql = postgres(databaseUrl, {
         max: 3,
-        ssl: process.env.DATABASE_URL.includes("sslmode=disable") ? false : "require"
+        ssl: databaseUrl.includes("sslmode=disable") ? false : "require"
       });
       await sql`
         create table if not exists users (
